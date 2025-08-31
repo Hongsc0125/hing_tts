@@ -1,5 +1,23 @@
+# 웹 프레임워크
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
 python-multipart==0.0.6
-coqui-tts
+
+# ML/AI 라이브러리
+torch>=2.0.0
+transformers>=4.51.0
+accelerate
+safetensors
+
+# 오디오 처리
+soundfile
+librosa
+numpy
+pydub  # MP3 지원
+
+# VibeVoice 관련 (로컬 모델 사용)
+# vibevoice  # 로컬에서 사용하므로 주석처리
+
+# 유틸리티
+tqdm
