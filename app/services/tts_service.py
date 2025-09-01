@@ -8,6 +8,7 @@ from pathlib import Path
 import soundfile as sf
 from typing import List, Optional
 import traceback
+from abc import ABC, abstractmethod
 
 # VibeVoice 모듈 경로 추가
 vibevoice_path = "/home/hsc0125/Hing_tts/models"
@@ -25,7 +26,21 @@ except ImportError as e:
     VIBEVOICE_AVAILABLE = False
 
 
-class TTSService:
+class BaseTTSService(ABC):
+    """TTS 서비스 기본 인터페이스"""
+    
+    @abstractmethod
+    def generate_speech(self, text: str, speaker_names: List[str] = None, cfg_scale: float = 3.0) -> str:
+        """음성 생성"""
+        pass
+    
+    @abstractmethod
+    def list_korean_voices(self) -> List[str]:
+        """사용 가능한 한국어 음성 목록 반환"""
+        pass
+
+
+class VibeVoiceTTSService(BaseTTSService):
     def __init__(self):
         self.model_path = "/home/hsc0125/Hing_tts/models/VibeVoice-1.5B"
         self.audio_samples_path = "/home/hsc0125/Hing_tts/models/audio_data"
@@ -243,5 +258,49 @@ class TTSService:
             raise e
 
 
-# 전역 TTS 서비스 인스턴스
-tts_service = TTSService()
+from .zonos_tts_service import ZonosTTSService
+from app.models.tts_request import ModelType
+
+
+class TTSServiceFactory:
+    """TTS 서비스 팩토리"""
+    
+    _vibevoice_instance = None
+    _zonos_instance = None
+    
+    @classmethod
+    def get_service(cls, model_type: ModelType) -> BaseTTSService:
+        """모델 타입에 따른 TTS 서비스 반환"""
+        if model_type == ModelType.VIBEVOICE:
+            if cls._vibevoice_instance is None:
+                cls._vibevoice_instance = VibeVoiceTTSService()
+            return cls._vibevoice_instance
+        elif model_type == ModelType.ZONOS:
+            if cls._zonos_instance is None:
+                cls._zonos_instance = ZonosTTSService()
+            return cls._zonos_instance
+        else:
+            raise ValueError(f"지원하지 않는 모델 타입: {model_type}")
+
+
+# 기본 TTS 서비스 인스턴스 (하위 호환성)
+tts_service = TTSServiceFactory.get_service(ModelType.VIBEVOICE)
+
+# 서버 시작 시 Zonos 모델도 미리 로드
+def preload_all_models():
+    """서버 시작 시 모든 TTS 모델을 미리 로드"""
+    print("🔄 모든 TTS 모델 사전 로딩 중...")
+    try:
+        # VibeVoice는 이미 로드됨
+        print("✅ VibeVoice 모델은 이미 로드됨")
+        
+        # Zonos 모델 사전 로드
+        zonos_service = TTSServiceFactory.get_service(ModelType.ZONOS)
+        print("✅ Zonos 모델 사전 로딩 완료")
+        
+        print("🎉 모든 TTS 모델 사전 로딩 완료!")
+    except Exception as e:
+        print(f"⚠️ 일부 모델 로딩 실패: {e}")
+
+# 모듈 로드 시 자동으로 모든 모델 사전 로드
+preload_all_models()
