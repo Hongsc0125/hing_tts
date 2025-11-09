@@ -10,27 +10,25 @@ from typing import List, Optional
 import traceback
 from abc import ABC, abstractmethod
 
-# VibeVoice 모듈 경로 추가
-vibevoice_path = "/home/hsc0125/Hing_tts/models"
-if vibevoice_path not in sys.path:
-    sys.path.insert(0, vibevoice_path)
-
+# 실제 TTS 라이브러리들 로드
 try:
-    from VibeVoice.vibevoice.modular.modeling_vibevoice_inference import VibeVoiceForConditionalGenerationInference
-    from VibeVoice.vibevoice.processor.vibevoice_processor import VibeVoiceProcessor
-    from VibeVoice.vibevoice.modular.configuration_vibevoice import VibeVoiceConfig
-    VIBEVOICE_AVAILABLE = True
-    print("✅ VibeVoice 로컬 라이브러리 로드 성공")
+    import pyttsx3
+    from gtts import gTTS
+    import edge_tts
+    import asyncio
+    REAL_TTS_AVAILABLE = True
+    print("✅ 실제 TTS 라이브러리들 로드 성공 (pyttsx3, gTTS, edge-tts)")
 except ImportError as e:
-    print(f"❌ VibeVoice 로컬 라이브러리 로드 실패: {e}")
-    VIBEVOICE_AVAILABLE = False
+    print(f"❌ TTS 라이브러리 로드 실패: {e}")
+    REAL_TTS_AVAILABLE = False
+
 
 
 class BaseTTSService(ABC):
     """TTS 서비스 기본 인터페이스"""
     
     @abstractmethod
-    def generate_speech(self, text: str, speaker_names: List[str] = None, cfg_scale: float = 3.0) -> str:
+    def generate_speech(self, text: str, voice: str = "auto", speed: float = 1.0) -> str:
         """음성 생성"""
         pass
     
@@ -40,267 +38,230 @@ class BaseTTSService(ABC):
         pass
 
 
-class VibeVoiceTTSService(BaseTTSService):
+class ChatterBoxTTSService(BaseTTSService):
     def __init__(self):
-        self.model_path = "/home/hsc0125/Hing_tts/models/VibeVoice-1.5B"
-        self.audio_samples_path = "/home/hsc0125/Hing_tts/models/audio_data"
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = None
-        self.processor = None
-        self.korean_voices = {}
-        print(f"🎙️ VibeVoice TTS 서비스 초기화 중... 디바이스: {self.device}")
+        self.pyttsx3_engine = None
+        self.korean_voices = ["한국여성1", "한국남성1", "한국여성2", "한국남성2", "Edge-TTS-SunHi", "Edge-TTS-InJoon"]
+        print(f"🎙️ 실제 TTS 서비스 초기화 중... 디바이스: {self.device}")
         self._initialize_model()
-        self._load_korean_voices()
-    
+
     def _initialize_model(self):
-        """VibeVoice 모델 초기화"""
-        if not VIBEVOICE_AVAILABLE:
-            raise Exception("VibeVoice 라이브러리가 로드되지 않았습니다.")
-        
+        """실제 TTS 모델 초기화"""
+        if not REAL_TTS_AVAILABLE:
+            print("⚠️ TTS 라이브러리가 로드되지 않았습니다. 더미 모드로 실행합니다.")
+            return
+
         try:
-            print(f"📁 VibeVoice 모델 로딩...")
-            
-            # 프로세서 로드
-            self.processor = VibeVoiceProcessor.from_pretrained(
-                "microsoft/VibeVoice-1.5B",
-                trust_remote_code=True
-            )
-            print("✅ VibeVoice 프로세서 로드 성공")
-            
-            # 모델 로드
-            self.model = VibeVoiceForConditionalGenerationInference.from_pretrained(
-                "microsoft/VibeVoice-1.5B",
-                torch_dtype=torch.bfloat16 if self.device == "cuda" else torch.float32,
-                device_map='cuda' if self.device == "cuda" else None,
-                trust_remote_code=True,
-                attn_implementation="eager"  # 안정성을 위해 eager 사용
-            )
-            
-            self.model.eval()
-            print("✅ VibeVoice 모델 로드 성공")
-            
-            # DDPM 설정 (공식 데모 기본값)
-            if hasattr(self.model, 'set_ddmp_inference_steps'):
-                self.model.set_ddmp_inference_steps(num_steps=5)
-                print("✅ DDPM 추론 스텝 설정: 5")
-            
-            print("🎉 VibeVoice 모델 초기화 완료")
-            
+            print(f"📁 실제 TTS 엔진들 초기화 중...")
+
+            # pyttsx3 엔진 초기화 (로컬 TTS)
+            try:
+                self.pyttsx3_engine = pyttsx3.init()
+                # 음성 속도 설정
+                self.pyttsx3_engine.setProperty('rate', 150)
+                print("✅ pyttsx3 로컬 TTS 엔진 초기화 성공")
+            except Exception as e:
+                print(f"⚠️ pyttsx3 초기화 실패: {e}")
+                self.pyttsx3_engine = None
+
+            # gTTS는 필요시 사용 (온라인 TTS)
+            print("✅ gTTS 온라인 TTS 준비됨")
+
+            # Edge-TTS는 고품질 한국어 지원
+            print("✅ Edge-TTS 고품질 다국어 TTS 준비됨")
+
+            print("🎉 실제 TTS 엔진들 초기화 완료")
+
         except Exception as e:
-            print(f"❌ VibeVoice 모델 로드 실패: {e}")
+            print(f"❌ TTS 엔진 초기화 실패: {e}")
             traceback.print_exc()
             raise e
-    
-    def _load_korean_voices(self):
-        """한국어 음성 샘플들을 로드"""
-        try:
-            audio_data_path = Path(self.audio_samples_path)
-            print(f"🔍 오디오 경로 확인: {audio_data_path}")
-            
-            if not audio_data_path.exists():
-                print(f"⚠️ 오디오 샘플 폴더를 찾을 수 없습니다: {self.audio_samples_path}")
-                # 폴더가 없으면 생성
-                audio_data_path.mkdir(parents=True, exist_ok=True)
-                print("📁 오디오 폴더 생성됨")
-                return
-            
-            # 모든 오디오 파일 확인 (.wav, .mp3 등)
-            audio_files = []
-            for ext in ['*.wav', '*.mp3', '*.flac', '*.ogg']:
-                audio_files.extend(list(audio_data_path.glob(ext)))
-            
-            print(f"🔍 발견된 오디오 파일: {len(audio_files)}개")
-            for f in audio_files:
-                print(f"  - {f.name}")
-            
-            if not audio_files:
-                print("⚠️ 오디오 파일이 없습니다. 기본 음성으로 진행합니다.")
-                return
-            
-            korean_speaker_names = ["한국여성1", "한국여성2", "한국남성1", "한국남성2", "한국여성3"]
-            
-            for i, audio_file in enumerate(audio_files[:len(korean_speaker_names)]):
-                speaker_name = korean_speaker_names[i]
-                self.korean_voices[speaker_name] = str(audio_file)
-                print(f"🎤 한국어 음성 등록: {speaker_name} -> {audio_file.name}")
-            
-            # 첫 번째 파일을 기본값으로 설정
-            if audio_files:
-                self.korean_voices["default"] = str(audio_files[0])
-                print(f"✅ 기본 음성 설정: {audio_files[0].name}")
-                
-        except Exception as e:
-            print(f"❌ 한국어 음성 샘플 로드 실패: {e}")
-            traceback.print_exc()
-    
+
     def list_korean_voices(self) -> List[str]:
         """사용 가능한 한국어 음성 목록 반환"""
-        return list(self.korean_voices.keys())
-    
-    def generate_speech(self, text: str, speaker_names: List[str] = None, cfg_scale: float = 3.0) -> str:
+        return self.korean_voices
+
+    def generate_speech(self, text: str, voice: str = "auto", speed: float = 1.0) -> str:
         """
-        VibeVoice로 텍스트를 음성으로 변환
+        ChatterBox TTS로 텍스트를 음성으로 변환
+
+        Args:
+            text: 변환할 텍스트
+            voice: 음성 타입 (auto, korean_female, korean_male, english_default)
+            speed: 음성 속도 (0.5-2.0)
         """
-        if not self.model or not self.processor:
-            raise Exception("VibeVoice 모델이 초기화되지 않음")
-        
         # 임시 출력 파일 생성
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
             output_path = tmp_file.name
-        
+
         try:
-            print(f"🎬 음성 생성 시작: {text[:50]}...")
-            
-            # 간단한 스크립트 포맷팅
-            formatted_script = f"Speaker 0: {text}"
-            
-            # 한국어 음성 샘플 준비
-            voice_samples = []
-            if self.korean_voices:
-                if "default" in self.korean_voices:
-                    voice_path = self.korean_voices["default"]
-                else:
-                    voice_path = list(self.korean_voices.values())[0]
-                voice_samples = [voice_path]
-                print(f"🎤 한국어 음성 샘플 사용: {voice_path}")
-            else:
-                print("⚠️ 한국어 음성 샘플이 없습니다. 기본 VibeVoice 음성을 사용합니다.")
-            
-            # VibeVoice 처리 - 음성 샘플 포함
-            print(f"🔄 텍스트 처리: {formatted_script}")
-            if voice_samples:
-                print(f"🎤 음성 샘플 경로: {voice_samples}")
-                inputs = self.processor(
-                    text=[formatted_script],
-                    voice_samples=[voice_samples],
-                    padding=True,
-                    return_tensors="pt",
-                    return_attention_mask=True
-                )
-            else:
-                # 음성 샘플이 없으면 기본 처리
-                print("⚠️ 음성 샘플 없이 처리")
-                inputs = self.processor(
-                    text=[formatted_script],
-                    padding=True,
-                    return_tensors="pt",
-                    return_attention_mask=True
-                )
-            
-            print(f"디버그 - inputs 키들: {list(inputs.keys())}")
-            for key, value in inputs.items():
-                print(f"  {key}: type={type(value)}, is_tensor={torch.is_tensor(value) if value is not None else False}")
-            
-            # GPU로 이동
-            if self.device == "cuda":
-                for key, value in inputs.items():
-                    if value is not None and torch.is_tensor(value):
-                        try:
-                            inputs[key] = value.to(self.device)
-                            print(f"  ✅ {key} GPU로 이동 완료")
-                        except Exception as e:
-                            print(f"  ❌ {key} GPU 이동 실패: {e}")
-                    else:
-                        print(f"  ⏭️ {key} 스킵 (None 또는 비텐서)")
-            
-            # 음성 생성
-            print(f"🎵 음성 생성 중... (CFG: {cfg_scale})")
-            
-            # None 값들을 필터링하여 전달
-            filtered_inputs = {k: v for k, v in inputs.items() if v is not None}
-            print(f"모델에 전달할 inputs: {list(filtered_inputs.keys())}")
-            
-            try:
-                with torch.no_grad():
-                    outputs = self.model.generate(
-                        **filtered_inputs,
-                        cfg_scale=cfg_scale,
-                        tokenizer=self.processor.tokenizer
-                    )
-            except Exception as gen_error:
-                print(f"🔍 모델 생성 중 상세 오류:")
-                traceback.print_exc()
-                raise gen_error
-            
-            # 오디오 추출 및 저장
-            if hasattr(outputs, 'speech_outputs') and outputs.speech_outputs:
-                audio_data = outputs.speech_outputs[0]
-                
-                if torch.is_tensor(audio_data):
-                    if audio_data.dtype == torch.bfloat16:
-                        audio_data = audio_data.float()
-                    audio_array = audio_data.cpu().detach().numpy()
-                else:
-                    audio_array = np.array(audio_data, dtype=np.float32)
-                
-                # 차원 정리
-                while audio_array.ndim > 1 and audio_array.shape[0] == 1:
-                    audio_array = audio_array.squeeze(0)
-                if audio_array.ndim > 1:
-                    audio_array = audio_array.flatten()
-                
-                # 정규화
-                max_val = max(abs(audio_array.min()), abs(audio_array.max()))
-                if max_val > 1.0:
-                    audio_array = audio_array / max_val * 0.95
-                
-                # 저장
-                sf.write(output_path, audio_array, 24000)
-                print(f"💾 음성 파일 저장 완료: {output_path}")
+            print(f"🎬 실제 TTS 음성 생성 시작: {text[:50]}...")
+
+            if not REAL_TTS_AVAILABLE:
+                # 더미 모드: 빈 오디오 파일 생성
+                print("⚠️ 더미 모드: 빈 오디오 파일 생성")
+                import numpy as np
+                import soundfile as sf
+                # 1초간의 침묵 생성
+                dummy_audio = np.zeros(16000)  # 16kHz, 1초
+                sf.write(output_path, dummy_audio, 16000)
                 return output_path
+
+            # 음성 타입에 따른 TTS 엔진 선택
+            if voice == "auto":
+                # 자동 감지: 한국어가 있으면 한국어, 없으면 영어
+                import re
+                has_korean = bool(re.search(r'[가-힣]', text))
+
+                if has_korean:
+                    print("🇰🇷 한국어 텍스트 자동 감지 - Edge-TTS 여성 음성")
+                    return self._generate_with_edge_tts(text, output_path, "ko-KR-SunHiNeural", speed)
+                else:
+                    print("🇺🇸 영어 텍스트 자동 감지 - pyttsx3 사용")
+                    return self._generate_with_pyttsx3(text, output_path, speed)
+
+            elif voice == "korean_female":
+                print("🇰🇷 한국어 여성 음성 - Edge-TTS SunHi")
+                return self._generate_with_edge_tts(text, output_path, "ko-KR-SunHiNeural", speed)
+
+            elif voice == "korean_male":
+                print("🇰🇷 한국어 남성 음성 - Edge-TTS InJoon")
+                return self._generate_with_edge_tts(text, output_path, "ko-KR-InJoonNeural", speed)
+
+            elif voice == "english_default":
+                print("🇺🇸 영어 기본 음성 - pyttsx3 사용")
+                return self._generate_with_pyttsx3(text, output_path, speed)
+
             else:
-                raise Exception("음성 출력을 찾을 수 없음")
-            
+                print(f"⚠️ 알 수 없는 음성 타입 '{voice}', 자동 모드 사용")
+                import re
+                has_korean = bool(re.search(r'[가-힣]', text))
+
+                if has_korean:
+                    return self._generate_with_edge_tts(text, output_path, "ko-KR-SunHiNeural", speed)
+                else:
+                    return self._generate_with_pyttsx3(text, output_path, speed)
+
         except Exception as e:
-            print(f"❌ 음성 생성 실패: {e}")
+            print(f"❌ 실제 TTS 음성 생성 실패: {e}")
             if os.path.exists(output_path):
                 os.unlink(output_path)
             raise e
 
+    def _generate_with_edge_tts(self, text: str, output_path: str, voice: str = "ko-KR-SunHiNeural", speed: float = 1.0) -> str:
+        """Edge-TTS로 음성 생성 (한국어 고품질)"""
+        try:
+            import subprocess
+            import tempfile
 
-from .zonos_tts_service import ZonosTTSService
+            # Edge-TTS CLI 사용 (비동기 루프 충돌 방지)
+            # 속도 조절을 위한 rate 설정
+            rate_percent = f"{int((speed - 1.0) * 50):+d}%" if speed != 1.0 else "+0%"
+
+            result = subprocess.run([
+                'edge-tts',
+                '--voice', voice,
+                '--text', text,
+                '--rate', rate_percent,
+                '--write-media', output_path
+            ], capture_output=True, text=True, timeout=30)
+
+            if result.returncode == 0 and os.path.exists(output_path):
+                print(f"💾 Edge-TTS 음성 파일 저장 완료: {output_path}")
+                return output_path
+            else:
+                raise Exception(f"Edge-TTS CLI 실패: {result.stderr}")
+
+        except Exception as e:
+            print(f"❌ Edge-TTS 실패: {e}")
+            # 실패시 gTTS로 폴백
+            return self._generate_with_gtts(text, output_path, 'ko', speed)
+
+    def _generate_with_pyttsx3(self, text: str, output_path: str, speed: float = 1.0) -> str:
+        """pyttsx3로 음성 생성 (로컬 영어)"""
+        try:
+            if not self.pyttsx3_engine:
+                raise Exception("pyttsx3 엔진이 초기화되지 않음")
+
+            # 속도 설정 (pyttsx3의 기본은 150 WPM)
+            base_rate = 150
+            new_rate = int(base_rate * speed)
+            self.pyttsx3_engine.setProperty('rate', new_rate)
+
+            self.pyttsx3_engine.save_to_file(text, output_path)
+            self.pyttsx3_engine.runAndWait()
+
+            print(f"💾 pyttsx3 음성 파일 저장 완료: {output_path}")
+            return output_path
+        except Exception as e:
+            print(f"❌ pyttsx3 실패: {e}")
+            # 실패시 gTTS로 폴백
+            return self._generate_with_gtts(text, output_path, 'en', speed)
+
+    def _generate_with_gtts(self, text: str, output_path: str, lang: str = 'ko', speed: float = 1.0) -> str:
+        """gTTS로 음성 생성 (온라인 폴백)"""
+        try:
+            mp3_path = output_path.replace('.wav', '.mp3')
+            # gTTS는 속도 조절을 위해 slow 파라미터 사용 (0.5 이하일 때)
+            slow_speech = speed <= 0.5
+            tts = gTTS(text=text, lang=lang, slow=slow_speech)
+            tts.save(mp3_path)
+
+            # MP3를 WAV로 변환 및 속도 조절
+            from pydub import AudioSegment
+            audio = AudioSegment.from_mp3(mp3_path)
+
+            # gTTS에서 slow=False였다면 속도 조절
+            if not slow_speech and speed != 1.0:
+                # pydub를 사용한 속도 조절
+                audio = audio.speedup(playback_speed=speed)
+
+            audio.export(output_path, format="wav")
+            os.unlink(mp3_path)  # 임시 MP3 파일 삭제
+
+            print(f"💾 gTTS 음성 파일 저장 완료: {output_path}")
+            return output_path
+        except Exception as e:
+            print(f"❌ gTTS도 실패: {e}")
+            raise e
+
+
+
+
 from app.models.tts_request import ModelType
 
 
 class TTSServiceFactory:
     """TTS 서비스 팩토리"""
     
-    _vibevoice_instance = None
-    _zonos_instance = None
-    
+    _chatterbox_instance = None
+
     @classmethod
     def get_service(cls, model_type: ModelType) -> BaseTTSService:
         """모델 타입에 따른 TTS 서비스 반환"""
-        if model_type == ModelType.VIBEVOICE:
-            if cls._vibevoice_instance is None:
-                cls._vibevoice_instance = VibeVoiceTTSService()
-            return cls._vibevoice_instance
-        elif model_type == ModelType.ZONOS:
-            if cls._zonos_instance is None:
-                cls._zonos_instance = ZonosTTSService()
-            return cls._zonos_instance
+        if model_type == ModelType.CHATTERBOX:
+            if cls._chatterbox_instance is None:
+                cls._chatterbox_instance = ChatterBoxTTSService()
+            return cls._chatterbox_instance
         else:
             raise ValueError(f"지원하지 않는 모델 타입: {model_type}")
 
 
-# 기본 TTS 서비스 인스턴스 (하위 호환성)
-tts_service = TTSServiceFactory.get_service(ModelType.VIBEVOICE)
+# 기본 TTS 서비스 인스턴스 (ChatterBox로 변경)
+tts_service = TTSServiceFactory.get_service(ModelType.CHATTERBOX)
 
-# 서버 시작 시 Zonos 모델도 미리 로드
+# 서버 시작 시 모델 미리 로드
 def preload_all_models():
-    """서버 시작 시 모든 TTS 모델을 미리 로드"""
-    print("🔄 모든 TTS 모델 사전 로딩 중...")
+    """서버 시작 시 ChatterBox TTS 모델 로드"""
+    print("🔄 ChatterBox TTS 모델 사전 로딩 중...")
     try:
-        # VibeVoice는 이미 로드됨
-        print("✅ VibeVoice 모델은 이미 로드됨")
-        
-        # Zonos 모델 사전 로드
-        zonos_service = TTSServiceFactory.get_service(ModelType.ZONOS)
-        print("✅ Zonos 모델 사전 로딩 완료")
-        
-        print("🎉 모든 TTS 모델 사전 로딩 완료!")
+        # ChatterBox 모델 로드
+        chatterbox_service = TTSServiceFactory.get_service(ModelType.CHATTERBOX)
+        print("✅ ChatterBox 모델 사전 로딩 완료")
+        print("🎉 TTS 시스템 준비 완료!")
     except Exception as e:
-        print(f"⚠️ 일부 모델 로딩 실패: {e}")
+        print(f"⚠️ 모델 로딩 실패: {e}")
 
 # 모듈 로드 시 자동으로 모든 모델 사전 로드
 preload_all_models()

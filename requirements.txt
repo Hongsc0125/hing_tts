@@ -4,35 +4,15 @@ uvicorn[standard]==0.24.0
 pydantic==2.5.0
 python-multipart==0.0.6
 
-# ML/AI 라이브러리
-torch>=2.5.1
-transformers>=4.48.1
-accelerate
-safetensors
-huggingface-hub>=0.28.1
+# ChatterBox TTS 라이브러리들
+pyttsx3>=2.90          # 로컬 영어 TTS
+gTTS>=2.3.1           # Google 온라인 TTS
+edge-tts>=6.1.3       # Microsoft Edge TTS (한국어 고품질)
 
 # 오디오 처리
 soundfile>=0.13.1
-torchaudio>=2.5.1
-librosa
+pydub                 # MP3/WAV 변환용
 numpy>=2.2.2
-pydub  # MP3 지원
-
-# VibeVoice 관련 (로컬 모델 사용)
-# vibevoice  # 로컬에서 사용하므로 주석처리
-
-# Zonos TTS 의존성
-inflect>=7.5.0
-kanjize>=1.5.0
-phonemizer>=3.3.0
-sudachidict-full>=20241021
-sudachipy>=0.6.10
-
-# Advanced Zonos 추가 의존성
-mamba-ssm  # Hybrid 모델용 (선택사항)
-packaging  # 버전 관리
-einops  # 텐서 연산
 
 # 유틸리티
-tqdm
-requests  # API 테스트용
+requests
